@@ -1,736 +1,289 @@
-# Trabajo-colaboratfrom abc import ABC, abstractmethod
-from datetime import datetime
+# Software FJ - Gestión de clientes, servicios y reservas
+# Programación - UNAD (código 213023)
+# Integrantes: (escribir aquí los nombres del grupo)
+
 import logging
+from abc import ABC, abstractmethod
 
-
-# ==========================================
-# CONFIGURACIÓN DEL ARCHIVO DE LOGS
-# ==========================================
-
+# Archivo donde se guardan los eventos y errores
 logging.basicConfig(
-    filename="software_fj_logs.txt",
+    filename="registro.log",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
-    encoding="utf-8"
+    encoding="utf-8",
 )
 
 
-# ==========================================
-# EXCEPCIONES PERSONALIZADAS
-# ==========================================
-
-class DatosInvalidosError(Exception):
+# ---------------- Excepciones propias ----------------
+class ErrorSistema(Exception):
     pass
 
 
-class ServicioNoDisponibleError(Exception):
+class ClienteError(ErrorSistema):
     pass
 
 
-class ReservaInvalidaError(Exception):
+class ServicioError(ErrorSistema):
     pass
 
 
-class OperacionNoPermitidaError(Exception):
+class ServicioNoDisponible(ErrorSistema):
     pass
 
 
-# ==========================================
-# CLASE ABSTRACTA ENTIDAD
-# ==========================================
+class ReservaError(ErrorSistema):
+    pass
 
+
+# ---------------- Clase abstracta general ----------------
 class Entidad(ABC):
-
-    def __init__(self, identificacion, nombre):
-        if not identificacion or not nombre:
-            raise DatosInvalidosError(
-                "La identificación y el nombre son obligatorios."
-            )
-
-        self._identificacion = identificacion
-        self._nombre = nombre
-
-    @property
-    def identificacion(self):
-        return self._identificacion
-
-    @property
-    def nombre(self):
-        return self._nombre
+    def __init__(self, codigo):
+        self.codigo = codigo
 
     @abstractmethod
-    def mostrar_informacion(self):
+    def mostrar_info(self):
         pass
 
 
-# ==========================================
-# CLASE CLIENTE
-# ==========================================
-
+# ---------------- Cliente ----------------
 class Cliente(Entidad):
+    def __init__(self, codigo, nombre, correo, telefono):
+        super().__init__(codigo)
 
-    def __init__(self, identificacion, nombre, correo, telefono):
-        super().__init__(identificacion, nombre)
+        # validaciones
+        if nombre is None or len(nombre.strip()) < 3:
+            raise ClienteError("el nombre debe tener minimo 3 letras")
+        if correo is None or "@" not in correo or "." not in correo:
+            raise ClienteError("el correo no es valido")
+        if not str(telefono).isdigit() or len(str(telefono)) < 7:
+            raise ClienteError("el telefono no es valido")
 
-        if "@" not in correo or "." not in correo:
-            raise DatosInvalidosError("El correo electrónico no es válido.")
-
-        if not telefono.isdigit() or len(telefono) < 7:
-            raise DatosInvalidosError("El teléfono no es válido.")
-
+        # atributos privados
+        self.__nombre = nombre.strip()
         self.__correo = correo
         self.__telefono = telefono
 
-    def mostrar_informacion(self):
-        return (
-            f"Cliente: {self.nombre} | "
-            f"ID: {self.identificacion} | "
-            f"Correo: {self.__correo} | "
-            f"Teléfono: {self.__telefono}"
-        )
+    def get_nombre(self):
+        return self.__nombre
+
+    def get_correo(self):
+        return self.__correo
+
+    def mostrar_info(self):
+        return "Cliente " + str(self.codigo) + ": " + self.__nombre + " - " + self.__correo
 
 
-# ==========================================
-# CLASE ABSTRACTA SERVICIO
-# ==========================================
-
-class Servicio(Entidad, ABC):
-
-    def __init__(self, identificacion, nombre, precio):
-        super().__init__(identificacion, nombre)
-
-        if not isinstance(precio, (int, float)) or precio <= 0:
-            raise DatosInvalidosError("El precio debe ser mayor que cero.")
-
-        self._precio = precio
-        self._disponible = True
+# ---------------- Servicio (abstracta) ----------------
+class Servicio(Entidad):
+    def __init__(self, codigo, nombre, precio_hora):
+        super().__init__(codigo)
+        if precio_hora <= 0:
+            raise ServicioError("el precio por hora debe ser mayor a 0")
+        self.nombre = nombre
+        self.precio_hora = precio_hora
+        self.disponible = True
 
     @abstractmethod
-    def calcular_costo(self, *args):
+    def calcular_costo(self, horas):
         pass
 
     @abstractmethod
-    def describir_servicio(self):
+    def validar_horas(self, horas):
         pass
 
-    def validar_disponibilidad(self):
-        if not self._disponible:
-            raise ServicioNoDisponibleError(
-                f"El servicio {self.nombre} no está disponible."
-            )
+    # "sobrecarga": el mismo metodo se puede llamar de varias formas
+    # calcular_total(2)  /  calcular_total(2, 0.05)  /  calcular_total(2, 0.05, 0.1)
+    def calcular_total(self, horas, impuesto=0.19, descuento=0):
+        self.validar_horas(horas)
+        if descuento < 0 or descuento >= 1:
+            raise ServicioError("descuento fuera de rango")
+        if impuesto < 0:
+            raise ServicioError("impuesto negativo")
+        costo = self.calcular_costo(horas)
+        total = costo - (costo * descuento)
+        total = total + (total * impuesto)
+        return round(total, 2)
 
-    def mostrar_informacion(self):
-        return (
-            f"Servicio: {self.nombre} | "
-            f"Precio: ${self._precio:,.2f} | "
-            f"Disponible: {self._disponible}"
-        )
+
+class SalaReuniones(Servicio):
+    def calcular_costo(self, horas):
+        return self.precio_hora * horas
+
+    def validar_horas(self, horas):
+        if horas <= 0 or horas > 12:
+            raise ServicioError("las salas se reservan entre 1 y 12 horas")
+
+    def mostrar_info(self):
+        return "Sala " + self.nombre + " - $" + str(self.precio_hora) + " por hora"
 
 
-# ==========================================
-# SERVICIO 1: RESERVA DE SALAS
-# ==========================================
-
-class ReservaSala(Servicio):
-
-    def calcular_costo(self, *args):
-
-        if len(args) < 1 or len(args) > 3:
-            raise DatosInvalidosError(
-                "Utilice duración, duración e impuesto, "
-                "o duración, impuesto y descuento."
-            )
-
-        duracion = args[0]
-        impuesto = args[1] if len(args) >= 2 else 0
-        descuento = args[2] if len(args) == 3 else 0
-
-        validar_parametros(duracion, impuesto, descuento)
-
-        costo = self._precio * duracion
-        costo += costo * impuesto / 100
-        costo -= costo * descuento / 100
-
+class AlquilerEquipo(Servicio):
+    def calcular_costo(self, horas):
+        costo = self.precio_hora * horas
+        # si es mas de un dia se hace 10% de descuento
+        if horas > 24:
+            costo = costo * 0.9
         return costo
 
-    def describir_servicio(self):
-        return "Reserva de salas de reuniones y conferencias."
+    def validar_horas(self, horas):
+        if horas <= 0 or horas > 72:
+            raise ServicioError("los equipos se alquilan maximo 72 horas")
+
+    def mostrar_info(self):
+        return "Equipo " + self.nombre + " - $" + str(self.precio_hora) + " por hora"
 
 
-# ==========================================
-# SERVICIO 2: ALQUILER DE EQUIPOS
-# ==========================================
+class Asesoria(Servicio):
+    def calcular_costo(self, horas):
+        # la asesoria tiene recargo por ser especializada
+        return self.precio_hora * horas * 1.5
 
-class AlquilerEquipos(Servicio):
+    def validar_horas(self, horas):
+        if horas < 0.5 or horas > 8:
+            raise ServicioError("las asesorias duran entre 0.5 y 8 horas")
 
-    def calcular_costo(self, *args):
-
-        if len(args) < 1 or len(args) > 3:
-            raise DatosInvalidosError("Cantidad incorrecta de parámetros.")
-
-        duracion = args[0]
-        impuesto = args[1] if len(args) >= 2 else 0
-        descuento = args[2] if len(args) == 3 else 0
-
-        validar_parametros(duracion, impuesto, descuento)
-
-        costo = self._precio * duracion
-        costo += costo * impuesto / 100
-        costo -= costo * descuento / 100
-
-        return costo
-
-    def describir_servicio(self):
-        return "Alquiler de computadores, proyectores y equipos tecnológicos."
+    def mostrar_info(self):
+        return "Asesoria " + self.nombre + " - $" + str(self.precio_hora) + " por hora"
 
 
-# ==========================================
-# SERVICIO 3: ASESORÍAS ESPECIALIZADAS
-# ==========================================
-
-class AsesoriaEspecializada(Servicio):
-
-    def calcular_costo(self, *args):
-
-        if len(args) < 1 or len(args) > 3:
-            raise DatosInvalidosError("Cantidad incorrecta de parámetros.")
-
-        duracion = args[0]
-        impuesto = args[1] if len(args) >= 2 else 0
-        descuento = args[2] if len(args) == 3 else 0
-
-        validar_parametros(duracion, impuesto, descuento)
-
-        costo = self._precio * duracion
-        costo += costo * impuesto / 100
-        costo -= costo * descuento / 100
-
-        return costo
-
-    def describir_servicio(self):
-        return "Asesorías profesionales en tecnología y sistemas."
-
-
-# ==========================================
-# VALIDACIÓN DE PARÁMETROS
-# ==========================================
-
-def validar_parametros(duracion, impuesto, descuento):
-
-    if not isinstance(duracion, (int, float)) or duracion <= 0:
-        raise DatosInvalidosError("La duración debe ser mayor que cero.")
-
-    if not isinstance(impuesto, (int, float)) or not 0 <= impuesto <= 100:
-        raise DatosInvalidosError("El impuesto debe estar entre 0 y 100.")
-
-    if not isinstance(descuento, (int, float)) or not 0 <= descuento <= 100:
-        raise DatosInvalidosError("El descuento debe estar entre 0 y 100.")
-
-
-# ==========================================
-# CLASE RESERVA
-# ==========================================
-
-class Reserva:
-
-    def __init__(self, identificacion, cliente, servicio, duracion):
-
-        if not isinstance(cliente, Cliente):
-            raise ReservaInvalidaError("El cliente no es válido.")
-
-        if not isinstance(servicio, Servicio):
-            raise ReservaInvalidaError("El servicio no es válido.")
-
-        if not isinstance(duracion, (int, float)) or duracion <= 0:
-            raise ReservaInvalidaError("La duración debe ser positiva.")
-
-        servicio.validar_disponibilidad()
-
-        self.identificacion = identificacion
+# ---------------- Reserva ----------------
+class Reserva(Entidad):
+    def __init__(self, codigo, cliente, servicio, horas):
+        super().__init__(codigo)
+        if cliente is None or servicio is None:
+            raise ReservaError("faltan datos para crear la reserva")
+        try:
+            servicio.validar_horas(horas)
+        except ServicioError as e:
+            # encadenamiento de excepciones
+            raise ReservaError("no se pudo crear la reserva") from e
         self.cliente = cliente
         self.servicio = servicio
-        self.duracion = duracion
+        self.horas = horas
         self.estado = "Pendiente"
-        self.costo = 0
+        self.total = 0
 
     def confirmar(self):
-
         if self.estado != "Pendiente":
-            raise OperacionNoPermitidaError(
-                "Solo se pueden confirmar reservas pendientes."
-            )
-
-        self.costo = self.servicio.calcular_costo(self.duracion)
-        self.estado = "Confirmada"
-
-        logging.info(
-            f"Reserva {self.identificacion} confirmada."
-        )
-
-        return self.costo
+            raise ReservaError("solo se confirman reservas pendientes")
+        try:
+            if not self.servicio.disponible:
+                raise ServicioNoDisponible("el servicio " + self.servicio.nombre + " no esta disponible")
+        except ServicioNoDisponible as e:
+            raise ReservaError("no se pudo confirmar la reserva") from e
+        else:
+            self.estado = "Confirmada"
+            logging.info("Reserva " + str(self.codigo) + " confirmada")
+        finally:
+            logging.info("Se intento confirmar la reserva " + str(self.codigo))
 
     def cancelar(self):
-
-        if self.estado == "Cancelada":
-            raise OperacionNoPermitidaError(
-                "La reserva ya está cancelada."
-            )
-
+        if self.estado == "Cancelada" or self.estado == "Procesada":
+            raise ReservaError("la reserva ya esta " + self.estado)
         self.estado = "Cancelada"
+        logging.info("Reserva " + str(self.codigo) + " cancelada")
 
-        logging.info(
-            f"Reserva {self.identificacion} cancelada."
-        )
-
-    def procesar(self):
-
+    def procesar(self, impuesto=0.19, descuento=0):
+        if self.estado != "Confirmada":
+            raise ReservaError("solo se procesan reservas confirmadas")
         try:
-            if self.estado == "Pendiente":
-                self.confirmar()
+            total = self.servicio.calcular_total(self.horas, impuesto, descuento)
+        except ErrorSistema as e:
+            raise ReservaError("error al procesar la reserva") from e
+        self.total = total
+        self.estado = "Procesada"
+        logging.info("Reserva " + str(self.codigo) + " procesada, total: " + str(total))
+        return total
 
-            elif self.estado == "Cancelada":
-                raise OperacionNoPermitidaError(
-                    "No se puede procesar una reserva cancelada."
-                )
-
-            print(f"Reserva {self.identificacion} procesada correctamente.")
-
-        except Exception as error:
-            logging.exception("Error al procesar la reserva.")
-            raise ReservaInvalidaError(
-                "No fue posible procesar la reserva."
-            ) from error
-
-        finally:
-            print("Finalizó el proceso de reserva.")
-
-    def mostrar_informacion(self):
-
-        return (
-            f"Reserva: {self.identificacion} | "
-            f"Cliente: {self.cliente.nombre} | "
-            f"Servicio: {self.servicio.nombre} | "
-            f"Duración: {self.duracion} horas | "
-            f"Estado: {self.estado} | "
-            f"Costo: ${self.costo:,.2f}"
-        )
+    def mostrar_info(self):
+        return ("Reserva " + str(self.codigo) + " [" + self.estado + "] "
+                + self.cliente.get_nombre() + " -> " + self.servicio.nombre
+                + " (" + str(self.horas) + " h)")
 
 
-# ==========================================
-# CLASE PRINCIPAL DEL SISTEMA
-# ==========================================
-
-class SistemaSoftwareFJ:
-
-    def __init__(self):
-
-        self.clientes = []
-        self.servicios = []
-        self.reservas = []
-
-    # REGISTRAR CLIENTES
-
-    def registrar_cliente(self, cliente):
-
-        try:
-            if not isinstance(cliente, Cliente):
-                raise DatosInvalidosError("El cliente no es válido.")
-
-            for existente in self.clientes:
-                if existente.identificacion == cliente.identificacion:
-                    raise DatosInvalidosError("El cliente ya está registrado.")
-
-            self.clientes.append(cliente)
-
-            logging.info(
-                f"Cliente registrado: {cliente.nombre}"
-            )
-
-            print("Cliente registrado correctamente.")
-
-        except Exception as error:
-            logging.exception("Error al registrar cliente.")
-            raise DatosInvalidosError(
-                "No se pudo registrar el cliente."
-            ) from error
-
-    # REGISTRAR SERVICIOS
-
-    def registrar_servicio(self, servicio):
-
-        try:
-            if not isinstance(servicio, Servicio):
-                raise DatosInvalidosError("El servicio no es válido.")
-
-            for existente in self.servicios:
-                if existente.identificacion == servicio.identificacion:
-                    raise DatosInvalidosError("El servicio ya existe.")
-
-            self.servicios.append(servicio)
-
-            logging.info(
-                f"Servicio registrado: {servicio.nombre}"
-            )
-
-            print("Servicio registrado correctamente.")
-
-        except Exception as error:
-            logging.exception("Error al registrar servicio.")
-            raise DatosInvalidosError(
-                "No se pudo registrar el servicio."
-            ) from error
-
-    # CREAR RESERVAS
-
-    def crear_reserva(self, identificacion, id_cliente, id_servicio, duracion):
-
-        try:
-
-            cliente = next(
-                (c for c in self.clientes
-                 if c.identificacion == id_cliente),
-                None
-            )
-
-            servicio = next(
-                (s for s in self.servicios
-                 if s.identificacion == id_servicio),
-                None
-            )
-
-            if cliente is None:
-                raise ReservaInvalidaError("Cliente no encontrado.")
-
-            if servicio is None:
-                raise ReservaInvalidaError("Servicio no encontrado.")
-
-            reserva = Reserva(
-                identificacion,
-                cliente,
-                servicio,
-                duracion
-            )
-
-            self.reservas.append(reserva)
-
-            logging.info(
-                f"Reserva creada: {identificacion}"
-            )
-
-            print("Reserva creada correctamente.")
-
-            return reserva
-
-        except Exception as error:
-            logging.exception("Error al crear reserva.")
-            raise ReservaInvalidaError(
-                "No fue posible crear la reserva."
-            ) from error
-
-        finally:
-            print("Finalizó la operación de creación de reserva.")
-
-    # MOSTRAR CLIENTES
-
-    def mostrar_clientes(self):
-
-        print("\n========== CLIENTES ==========")
-
-        for cliente in self.clientes:
-            print(cliente.mostrar_informacion())
-
-    # MOSTRAR SERVICIOS
-
-    def mostrar_servicios(self):
-
-        print("\n========== SERVICIOS ==========")
-
-        for servicio in self.servicios:
-            print(servicio.mostrar_informacion())
-            print(servicio.describir_servicio())
-
-    # MOSTRAR RESERVAS
-
-    def mostrar_reservas(self):
-
-        print("\n========== RESERVAS ==========")
-
-        for reserva in self.reservas:
-            print(reserva.mostrar_informacion())
-
-
-# ==========================================
-# PROGRAMA PRINCIPAL Y PRUEBAS
-# ==========================================
-
-def ejecutar_sistema():
-
-    sistema = SistemaSoftwareFJ()
-
-    print("\n========================================")
-    print("     SISTEMA INTEGRAL SOFTWARE FJ")
-    print("========================================")
-
-    # OPERACIÓN 1: Registrar primer cliente
-
-    print("\nOPERACIÓN 1")
-
+# ---------------- Programa principal ----------------
+def probar(texto, accion):
+    """Ejecuta una operacion y si falla guarda el error pero el programa sigue."""
     try:
-        cliente1 = Cliente(
-            "1001",
-            "Carlos Pérez",
-            "carlos@gmail.com",
-            "3001234567"
-        )
-
-        sistema.registrar_cliente(cliente1)
-
-    except Exception as error:
-        print("Error:", error)
-
-    # OPERACIÓN 2: Registrar segundo cliente
-
-    print("\nOPERACIÓN 2")
-
-    try:
-        cliente2 = Cliente(
-            "1002",
-            "María Rodríguez",
-            "maria@gmail.com",
-            "3019876543"
-        )
-
-        sistema.registrar_cliente(cliente2)
-
-    except Exception as error:
-        print("Error:", error)
-
-    # OPERACIÓN 3: Registrar cliente inválido
-
-    print("\nOPERACIÓN 3")
-
-    try:
-        cliente3 = Cliente(
-            "1003",
-            "Pedro López",
-            "correo_invalido",
-            "3001234567"
-        )
-
-        sistema.registrar_cliente(cliente3)
-
-    except Exception as error:
-        print("Error controlado:", error)
-
-    # OPERACIÓN 4: Crear servicio de salas
-
-    print("\nOPERACIÓN 4")
-
-    try:
-        sala = ReservaSala(
-            "S01",
-            "Reserva de salas",
-            50000
-        )
-
-        sistema.registrar_servicio(sala)
-
-    except Exception as error:
-        print("Error:", error)
-
-    # OPERACIÓN 5: Crear servicio de equipos
-
-    print("\nOPERACIÓN 5")
-
-    try:
-        equipos = AlquilerEquipos(
-            "S02",
-            "Alquiler de equipos",
-            30000
-        )
-
-        sistema.registrar_servicio(equipos)
-
-    except Exception as error:
-        print("Error:", error)
-
-    # OPERACIÓN 6: Crear servicio de asesorías
-
-    print("\nOPERACIÓN 6")
-
-    try:
-        asesoria = AsesoriaEspecializada(
-            "S03",
-            "Asesoría especializada",
-            80000
-        )
-
-        sistema.registrar_servicio(asesoria)
-
-    except Exception as error:
-        print("Error:", error)
-
-    # OPERACIÓN 7: Intentar crear servicio inválido
-
-    print("\nOPERACIÓN 7")
-
-    try:
-        servicio_invalido = ReservaSala(
-            "S04",
-            "Sala inválida",
-            -5000
-        )
-
-        sistema.registrar_servicio(servicio_invalido)
-
-    except Exception as error:
-        print("Error controlado:", error)
-
-    # OPERACIÓN 8: Crear reserva válida
-
-    print("\nOPERACIÓN 8")
-
-    try:
-        reserva1 = sistema.crear_reserva(
-            "R001",
-            "1001",
-            "S01",
-            3
-        )
-
-        costo = reserva1.confirmar()
-
-        print(f"Costo de la reserva: ${costo:,.2f}")
-
-    except Exception as error:
-        print("Error:", error)
-
-    # OPERACIÓN 9: Crear reserva con cliente inexistente
-
-    print("\nOPERACIÓN 9")
-
-    try:
-        sistema.crear_reserva(
-            "R002",
-            "9999",
-            "S02",
-            2
-        )
-
-    except Exception as error:
-        print("Error controlado:", error)
-
-    # OPERACIÓN 10: Crear reserva con duración inválida
-
-    print("\nOPERACIÓN 10")
-
-    try:
-        sistema.crear_reserva(
-            "R003",
-            "1002",
-            "S02",
-            -2
-        )
-
-    except Exception as error:
-        print("Error controlado:", error)
-
-    # OPERACIÓN 11: Crear y cancelar reserva
-
-    print("\nOPERACIÓN 11")
-
-    try:
-        reserva2 = sistema.crear_reserva(
-            "R004",
-            "1002",
-            "S03",
-            2
-        )
-
-        reserva2.cancelar()
-
-        print("Reserva cancelada correctamente.")
-
-    except Exception as error:
-        print("Error:", error)
-
-    # OPERACIÓN 12: Procesar una reserva
-
-    print("\nOPERACIÓN 12")
-
-    try:
-        reserva3 = sistema.crear_reserva(
-            "R005",
-            "1001",
-            "S02",
-            4
-        )
-
-        reserva3.procesar()
-
-    except Exception as error:
-        print("Error:", error)
-
-    # OPERACIÓN 13: Calcular costo con impuesto
-
-    print("\nOPERACIÓN 13")
-
-    try:
-        costo = sala.calcular_costo(3, 19)
-
-        print(f"Costo con impuesto: ${costo:,.2f}")
-
-    except Exception as error:
-        print("Error:", error)
-
-    # OPERACIÓN 14: Calcular costo con impuesto y descuento
-
-    print("\nOPERACIÓN 14")
-
-    try:
-        costo = asesoria.calcular_costo(2, 19, 10)
-
-        print(f"Costo con impuesto y descuento: ${costo:,.2f}")
-
-    except Exception as error:
-        print("Error:", error)
-
-    # MOSTRAR INFORMACIÓN FINAL
-
-    sistema.mostrar_clientes()
-    sistema.mostrar_servicios()
-    sistema.mostrar_reservas()
-
-    print("\n========================================")
-    print("       RESUMEN DEL SISTEMA")
-    print("========================================")
-
-    print("Total de clientes:", len(sistema.clientes))
-    print("Total de servicios:", len(sistema.servicios))
-    print("Total de reservas:", len(sistema.reservas))
-
-    print("\nLos eventos y errores se guardaron en:")
-    print("software_fj_logs.txt")
-
-    print("\nSistema ejecutado correctamente.")
-
-
-# ==========================================
-# INICIO DEL PROGRAMA
-# ==========================================
-
-if __name__ == "__main__":
-
-    try:
-        ejecutar_sistema()
-
-    except Exception as error:
-        logging.critical(
-            f"Error crítico del sistema: {error}",
-            exc_info=True
-        )
-
-        print("Se presentó un error crítico:", error)
-
+        resultado = accion()
+    except ErrorSistema as e:
+        mensaje = str(e)
+        if e.__cause__ is not None:
+            mensaje = mensaje + " (causa: " + str(e.__cause__) + ")"
+        logging.error(texto + " -> " + mensaje)
+        print("ERROR  - " + texto + ": " + mensaje)
+    except Exception as e:
+        logging.critical(texto + " -> error inesperado: " + str(e))
+        print("ERROR  - " + texto + ": error inesperado: " + str(e))
+    else:
+        logging.info(texto + " -> OK")
+        print("OK     - " + texto)
+        return resultado
     finally:
-        print("\nEjecución del programa finalizada.")ivo-
+        logging.info("Termino: " + texto)
+
+
+def main():
+    lista_clientes = []
+    lista_servicios = []
+    lista_reservas = []
+
+    logging.info("----- Inicia la simulacion -----")
+
+    print("=== CLIENTES ===")
+    c1 = probar("Registrar cliente Ana", lambda: Cliente(1, "Ana Gomez", "ana@correo.com", "3001234567"))
+    c2 = probar("Registrar cliente Luis", lambda: Cliente(2, "Luis Perez", "luis@correo.com", "3109876543"))
+    probar("Registrar cliente con correo malo", lambda: Cliente(3, "Pedro", "pedrocorreo", "3001112233"))
+    probar("Registrar cliente sin nombre", lambda: Cliente(4, "", "a@correo.com", "3001112233"))
+    for c in (c1, c2):
+        if c is not None:
+            lista_clientes.append(c)
+
+    print("\n=== SERVICIOS ===")
+    s1 = probar("Crear sala de reuniones", lambda: SalaReuniones(1, "Sala A", 50000))
+    s2 = probar("Crear alquiler de equipo", lambda: AlquilerEquipo(2, "Portatil", 8000))
+    s3 = probar("Crear asesoria", lambda: Asesoria(3, "Python", 70000))
+    probar("Crear sala con precio negativo", lambda: SalaReuniones(4, "Sala B", -100))
+    probar("Crear servicio abstracto", lambda: Servicio(5, "Generico", 1000))
+    for s in (s1, s2, s3):
+        if s is not None:
+            lista_servicios.append(s)
+
+    print("\n=== RESERVAS ===")
+    r1 = probar("Reserva sala 3 horas", lambda: Reserva(1, c1, s1, 3))
+    r2 = probar("Reserva equipo 30 horas", lambda: Reserva(2, c2, s2, 30))
+    probar("Reserva asesoria 20 horas", lambda: Reserva(3, c1, s3, 20))
+    probar("Reserva sin cliente", lambda: Reserva(4, None, s1, 2))
+    r5 = probar("Reserva asesoria 2 horas", lambda: Reserva(5, c2, s3, 2))
+    for r in (r1, r2, r5):
+        if r is not None:
+            lista_reservas.append(r)
+
+    print("\n=== CONFIRMAR, PROCESAR Y CANCELAR ===")
+    if r1 is not None:
+        probar("Confirmar reserva 1", r1.confirmar)
+        probar("Procesar reserva 1", r1.procesar)
+        probar("Cancelar reserva 1 (ya procesada)", r1.cancelar)
+    if r2 is not None:
+        probar("Confirmar reserva 2", r2.confirmar)
+        probar("Procesar reserva 2 con descuento 150%", lambda: r2.procesar(0.19, 1.5))
+        probar("Procesar reserva 2 con IVA 5% y descuento 10%", lambda: r2.procesar(0.05, 0.1))
+    if r5 is not None:
+        s3.disponible = False   # simulamos que la asesoria ya no esta disponible
+        probar("Confirmar reserva 5 (servicio no disponible)", r5.confirmar)
+        probar("Cancelar reserva 5", r5.cancelar)
+        probar("Cancelar reserva 5 otra vez", r5.cancelar)
+
+    print("\n=== RESUMEN ===")
+    for c in lista_clientes:
+        print(c.mostrar_info())
+    for s in lista_servicios:
+        print(s.mostrar_info())
+    for r in lista_reservas:
+        print(r.mostrar_info(), "| total:", r.total)
+
+    logging.info("----- Termina la simulacion -----")
+    print("\nLos errores y eventos quedaron guardados en registro.log")
+
+
+main()
